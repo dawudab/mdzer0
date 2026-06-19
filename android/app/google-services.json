@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "957828657962",
+    "project_id": "deliverayappmvp",
+    "storage_bucket": "deliverayappmvp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:957828657962:android:c29ffa743aacca17dae453",
+        "android_client_info": {
+          "package_name": "com.example.delivery_service_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAc0eNtt8a96zy0H_pL39937SarSNqWwPE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
