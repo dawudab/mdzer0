@@ -287,6 +287,7 @@ class _OrderCardState extends State<_OrderCard> {
     final customerName = (data['customerName'] as String?) ?? 'Customer';
     final customerAddress =
         (data['customerAddress'] as String?) ?? 'Address not provided';
+    final paymentMethod = (data['paymentMethod'] as String?) ?? 'In-App';
     final rawItems = data['items'];
     final items = rawItems is List ? rawItems : <dynamic>[];
     final timestamp = data['createdAt'];
@@ -305,9 +306,8 @@ class _OrderCardState extends State<_OrderCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- Header: order ID + timestamp ---
+            // --- Header: order ID + payment method + timestamp ---
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -327,6 +327,9 @@ class _OrderCardState extends State<_OrderCard> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                _PaymentBadge(method: paymentMethod),
+                const Spacer(),
                 Text(
                   _formatTimestamp(timestamp),
                   style: const TextStyle(fontSize: 11, color: Colors.grey),
@@ -520,6 +523,51 @@ class _OrderCardState extends State<_OrderCard> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Payment method badge
+// ---------------------------------------------------------------------------
+
+class _PaymentBadge extends StatelessWidget {
+  final String method;
+
+  const _PaymentBadge({required this.method});
+
+  @override
+  Widget build(BuildContext context) {
+    final isInApp =
+        method.toLowerCase().contains('in') ||
+        method.toLowerCase().contains('app');
+
+    final color = isInApp ? const Color(0xFF6366F1) : const Color(0xFFF59E0B);
+    final icon = isInApp ? Icons.credit_card : Icons.storefront_outlined;
+    final label = isInApp ? 'In-App' : 'Direct to Store';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
