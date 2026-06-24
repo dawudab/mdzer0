@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_options.dart';
 import 'screens/auth/auth_screen.dart';
+import 'screens/store/store_main_screen.dart';
 
 const Color kPrimaryColor = Color(0xFF10B981);
 
@@ -137,22 +138,6 @@ class CustomerMainScreen extends StatelessWidget {
         title: const Text('Customer'),
       ),
       body: const Center(child: Text('Customer Main Screen')),
-    );
-  }
-}
-
-class StoreMainScreen extends StatelessWidget {
-  const StoreMainScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: kPrimaryColor,
-        foregroundColor: Colors.white,
-        title: const Text('Store'),
-      ),
-      body: const Center(child: Text('Store Main Screen')),
     );
   }
 }
