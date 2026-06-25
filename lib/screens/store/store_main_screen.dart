@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../models/store_item.dart';
+import '../../models/store_profile.dart';
+import '../../services/store_service.dart';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -20,7 +24,7 @@ const List<String> kOrderStages = [
 ];
 
 // ---------------------------------------------------------------------------
-// Root screen — Multi-tab POS with BottomNavigationBar
+// Root screen — 4-tab layout with BottomNavigationBar
 // ---------------------------------------------------------------------------
 
 class StoreMainScreen extends StatefulWidget {
@@ -33,8 +37,14 @@ class StoreMainScreen extends StatefulWidget {
 class _StoreMainScreenState extends State<StoreMainScreen> {
   int _currentTab = 0;
 
+  static const _titles = ['Dashboard', 'Orders', 'Inventory', 'My Store'];
+
+  void _jumpToTab(int index) => setState(() => _currentTab = index);
+
   @override
   Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
     return Scaffold(
       backgroundColor: _kBackground,
       appBar: AppBar(
@@ -42,13 +52,13 @@ class _StoreMainScreenState extends State<StoreMainScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.storefront_rounded, size: 24),
-            SizedBox(width: 10),
+            const Icon(Icons.storefront_rounded, size: 24),
+            const SizedBox(width: 10),
             Text(
-              'Store Dashboard',
-              style: TextStyle(
+              _titles[_currentTab],
+              style: const TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 20,
                 letterSpacing: -0.3,
@@ -57,6 +67,12 @@ class _StoreMainScreenState extends State<StoreMainScreen> {
           ],
         ),
         actions: [
+          if (_currentTab == 1)
+            IconButton(
+              icon: const Icon(Icons.bug_report_rounded),
+              tooltip: 'Add test order',
+              onPressed: () => _addDummyOrder(uid),
+            ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Sign out',
@@ -67,22 +83,24 @@ class _StoreMainScreenState extends State<StoreMainScreen> {
       ),
       body: IndexedStack(
         index: _currentTab,
-        children: const [_OrdersTab(), _InventoryTab()],
+        children: [
+          _DashboardTab(uid: uid, onJumpToTab: _jumpToTab),
+          const _OrdersTab(),
+          _InventoryTab(uid: uid),
+          _ProfileTab(uid: uid),
+        ],
       ),
-      floatingActionButton: _currentTab == 0
-          ? FloatingActionButton(
-              backgroundColor: _kPrimary,
-              onPressed: _addDummyOrder,
-              tooltip: 'Add test order',
-              child: const Icon(Icons.bug_report, color: Colors.white),
-            )
-          : null,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentTab,
         selectedItemColor: _kPrimary,
         unselectedItemColor: Colors.grey.shade400,
+        type: BottomNavigationBarType.fixed,
         onTap: (index) => setState(() => _currentTab = index),
         items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_rounded),
+            label: 'Dashboard',
+          ),
           BottomNavigationBarItem(
             icon: Icon(Icons.receipt_long_rounded),
             label: 'Orders',
@@ -91,13 +109,16 @@ class _StoreMainScreenState extends State<StoreMainScreen> {
             icon: Icon(Icons.inventory_2_rounded),
             label: 'Inventory',
           ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.store_rounded),
+            label: 'Profile',
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _addDummyOrder() async {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+  Future<void> _addDummyOrder(String uid) async {
     await FirebaseFirestore.instance.collection('orders').add({
       'storeId': uid,
       'customerName': 'Test Customer',
@@ -120,6 +141,246 @@ class _StoreMainScreenState extends State<StoreMainScreen> {
         ),
       );
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tab 0 – Dashboard
+// ---------------------------------------------------------------------------
+
+class _DashboardTab extends StatelessWidget {
+  final String uid;
+  final void Function(int) onJumpToTab;
+
+  const _DashboardTab({required this.uid, required this.onJumpToTab});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('orders')
+          .where('storeId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, orderSnap) {
+        final orders = orderSnap.data?.docs ?? [];
+        final activeOrders = orders
+            .where((d) => (d.data()['status'] as String?) != 'Delivered')
+            .length;
+
+        return StreamBuilder<List<StoreItem>>(
+          stream: StoreService().getStoreInventory(uid),
+          builder: (context, invSnap) {
+            final liveItems = (invSnap.data ?? [])
+                .where((i) => i.isAvailable)
+                .length;
+
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Stat cards ──
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatCard(
+                          label: 'Active Orders',
+                          value: activeOrders.toString(),
+                          icon: Icons.receipt_long_rounded,
+                          iconBg: const Color(0xFFFEF3C7),
+                          iconColor: const Color(0xFFF59E0B),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: _StatCard(
+                          label: 'Total Live Items',
+                          value: liveItems.toString(),
+                          icon: Icons.inventory_2_rounded,
+                          iconBg: _kPrimaryLight,
+                          iconColor: _kPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 28),
+
+                  // ── Quick actions ──
+                  const Text(
+                    'Quick Actions',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  _QuickActionButton(
+                    icon: Icons.add_box_rounded,
+                    label: 'Add New Item',
+                    subtitle: 'Add a product to your inventory',
+                    onTap: () => onJumpToTab(2),
+                  ),
+                  const SizedBox(height: 10),
+                  _QuickActionButton(
+                    icon: Icons.store_rounded,
+                    label: 'View Profile',
+                    subtitle: 'Edit your store name, address & status',
+                    onTap: () => onJumpToTab(3),
+                  ),
+                  const SizedBox(height: 10),
+                  _QuickActionButton(
+                    icon: Icons.receipt_long_rounded,
+                    label: 'Go to Orders',
+                    subtitle: 'Manage and update live orders',
+                    onTap: () => onJumpToTab(1),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: iconColor, size: 22),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0F172A),
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey.shade500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _QuickActionButton({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _kPrimaryLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: _kPrimary, size: 20),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -902,209 +1163,609 @@ class _StageProgressBar extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Inventory Tab
+// Tab 2 – Inventory (Firestore)
 // ---------------------------------------------------------------------------
 
-class _InventoryTab extends StatefulWidget {
-  const _InventoryTab();
+class _InventoryTab extends StatelessWidget {
+  final String uid;
 
-  @override
-  State<_InventoryTab> createState() => _InventoryTabState();
-}
-
-class _InventoryTabState extends State<_InventoryTab> {
-  final List<_InventoryItem> _items = [
-    _InventoryItem(
-      name: 'Premium Breakfast Box',
-      description: 'Eggs, toast, fresh fruit & yogurt',
-      price: 18.50,
-      inStock: true,
-    ),
-    _InventoryItem(
-      name: 'Family Grocery Box',
-      description: 'Staples for a family of 4 — rice, oil, vegetables',
-      price: 42.00,
-      inStock: true,
-    ),
-    _InventoryItem(
-      name: 'Rice 5kg',
-      description: 'Premium long-grain basmati rice',
-      price: 12.00,
-      inStock: true,
-    ),
-  ];
+  const _InventoryTab({required this.uid});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+    final service = StoreService();
+
+    return Scaffold(
+      backgroundColor: _kBackground,
+      body: StreamBuilder<List<StoreItem>>(
+        stream: service.getStoreInventory(uid),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: _kPrimary),
+            );
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'Error loading inventory\n${snapshot.error}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.red.shade400),
+                ),
               ),
-            ],
-          ),
-          child: Column(
+            );
+          }
+
+          final items = snapshot.data ?? [];
+
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Store Catalog',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF1E293B),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Store Catalog',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${items.length} item${items.length == 1 ? '' : 's'} · Toggle availability for customers',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Toggle items in or out of stock',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              Expanded(
+                child: items.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(48),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: const BoxDecoration(
+                                  color: _kPrimaryLight,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.inventory_2_rounded,
+                                  size: 48,
+                                  color: _kPrimary.withValues(alpha: 0.6),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              Text(
+                                'No items yet',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Tap + to add your first product.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final item = items[index];
+                          return _InventoryItemTile(
+                            item: item,
+                            service: service,
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: _kPrimary,
+        foregroundColor: Colors.white,
+        tooltip: 'Add item',
+        onPressed: () => _showAddItemDialog(context, uid, service),
+        child: const Icon(Icons.add_rounded),
+      ),
+    );
+  }
+
+  Future<void> _showAddItemDialog(
+    BuildContext context,
+    String uid,
+    StoreService service,
+  ) async {
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Add New Item',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: nameCtrl,
+                decoration: _inputDecoration('Item Name'),
+                textCapitalization: TextCapitalization.words,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: priceCtrl,
+                decoration: _inputDecoration('Price (e.g. 12.50)'),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  if (double.tryParse(v.trim()) == null) return 'Invalid price';
+                  return null;
+                },
               ),
             ],
           ),
         ),
-        Expanded(
-          child: ListView.separated(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.all(16),
-            itemCount: _items.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final item = _items[index];
-              return Card(
-                elevation: 3,
-                shadowColor: Colors.black.withValues(alpha: 0.08),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: item.inStock
-                              ? _kPrimaryLight
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.shopping_basket_rounded,
-                          color: item.inStock
-                              ? _kPrimary
-                              : Colors.grey.shade400,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.name,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: item.inStock
-                                    ? const Color(0xFF1E293B)
-                                    : Colors.grey.shade500,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              item.description,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '\$${item.price.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: _kPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        children: [
-                          Switch(
-                            value: item.inStock,
-                            activeThumbColor: _kPrimary,
-                            onChanged: (val) {
-                              setState(
-                                () =>
-                                    _items[index] = item.copyWith(inStock: val),
-                              );
-                            },
-                          ),
-                          Text(
-                            item.inStock ? 'In Stock' : 'Out',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: item.inStock
-                                  ? _kPrimary
-                                  : Colors.red.shade400,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
           ),
-        ),
-      ],
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kPrimary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              final newItem = StoreItem(
+                itemId: '',
+                storeId: uid,
+                name: nameCtrl.text.trim(),
+                price: double.parse(priceCtrl.text.trim()),
+              );
+              Navigator.pop(ctx);
+              await service.addOrUpdateItem(newItem);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
     );
   }
 }
 
+InputDecoration _inputDecoration(String label) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: TextStyle(color: Colors.grey.shade600),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: _kPrimary, width: 1.5),
+    ),
+  );
+}
+
+class _InventoryItemTile extends StatelessWidget {
+  final StoreItem item;
+  final StoreService service;
+
+  const _InventoryItemTile({required this.item, required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.07),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: item.isAvailable ? _kPrimaryLight : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.shopping_basket_rounded,
+                color: item.isAvailable ? _kPrimary : Colors.grey.shade400,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: item.isAvailable
+                          ? const Color(0xFF1E293B)
+                          : Colors.grey.shade500,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '\$${item.price.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: _kPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: item.isAvailable,
+              activeColor: _kPrimary,
+              onChanged: (val) {
+                service.addOrUpdateItem(item.copyWith(isAvailable: val));
+              },
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                color: Colors.red.shade400,
+              ),
+              onPressed: () => _confirmDelete(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Item?'),
+        content: Text('"${item.name}" will be permanently removed.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade500,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await service.deleteItem(item.itemId);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Inventory item model
+// Tab 3 – Store Profile
 // ---------------------------------------------------------------------------
 
-class _InventoryItem {
-  final String name;
-  final String description;
-  final double price;
-  final bool inStock;
+class _ProfileTab extends StatefulWidget {
+  final String uid;
 
-  const _InventoryItem({
-    required this.name,
-    required this.description,
-    required this.price,
-    required this.inStock,
-  });
+  const _ProfileTab({required this.uid});
 
-  _InventoryItem copyWith({bool? inStock}) {
-    return _InventoryItem(
-      name: name,
-      description: description,
-      price: price,
-      inStock: inStock ?? this.inStock,
+  @override
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<_ProfileTab> {
+  final _service = StoreService();
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+
+  bool _isLive = false;
+  bool _isLoading = true;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final profile = await _service.getStoreProfile(widget.uid);
+    if (!mounted) return;
+    setState(() {
+      _nameCtrl.text = profile?.name ?? '';
+      _addressCtrl.text = profile?.address ?? '';
+      _isLive = profile?.isLive ?? false;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
+    try {
+      final profile = StoreProfile(
+        storeId: widget.uid,
+        name: _nameCtrl.text.trim(),
+        address: _addressCtrl.text.trim(),
+        isLive: _isLive,
+      );
+      await _service.updateStoreProfile(profile);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile saved!'),
+            backgroundColor: _kPrimary,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Save failed: $e'),
+            backgroundColor: Colors.red.shade600,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _addressCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: _kPrimary));
+    }
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Logo / avatar ──
+            Center(
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: _kPrimaryLight,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Center(
+                  child: Text('🏪', style: TextStyle(fontSize: 38)),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            const Text(
+              'Store Information',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            TextFormField(
+              controller: _nameCtrl,
+              decoration: _inputDecoration('Store Name'),
+              textCapitalization: TextCapitalization.words,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Store name is required'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _addressCtrl,
+              decoration: _inputDecoration('Address'),
+              textCapitalization: TextCapitalization.sentences,
+              maxLines: 2,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Address is required'
+                  : null,
+            ),
+
+            const SizedBox(height: 24),
+
+            // ── isLive toggle ──
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _isLive
+                      ? _kPrimary.withValues(alpha: 0.4)
+                      : const Color(0xFFE2E8F0),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: _isLive ? _kPrimaryLight : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.wifi_tethering_rounded,
+                      color: _isLive ? _kPrimary : Colors.grey.shade400,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Store is Live',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        Text(
+                          _isLive
+                              ? 'Visible to customers on the map'
+                              : 'Hidden from customers',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _isLive
+                                ? _kPrimaryDark
+                                : Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _isLive,
+                    activeColor: _kPrimary,
+                    onChanged: (val) => setState(() => _isLive = val),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // ── Save button ──
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kPrimary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: _isSaving ? null : _saveProfile,
+                child: _isSaving
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Save Profile',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
